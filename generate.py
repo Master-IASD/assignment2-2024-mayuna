@@ -5,6 +5,7 @@ import argparse
 
 
 from model import Generator
+from model import Discriminator
 from utils import load_model
 
 def load_decoder(D, folder):
