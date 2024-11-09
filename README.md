@@ -1,5 +1,21 @@
 # DataLabAssignement2
 
+
+
+## Code to verify fid
+
+first, you need 
+pip install pytorch-fid
+
+then you need download my real_images dataset, its the picture of MNIST,
+thecan use code like this 
+
+python -m pytorch_fid real_images samples --device cuda:0
+
+if you donot have gpu 
+python -m pytorch_fid real_images samples
+
+
 ## generate.py
 Use the file *generate.py* to generate 10000 samples of MNIST in the folder samples. 
 Example:

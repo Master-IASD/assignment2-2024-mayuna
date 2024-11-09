@@ -1,96 +1,58 @@
 import torch
 import os
-import numpy as np
-from sklearn.mixture import GaussianMixture
 
-latent_dim = 100
-n_components = 10
-gmm = GaussianMixture(n_components=n_components)
-gmm.fit(np.random.randn(10000, latent_dim))  # Fit once on a large random sample
-
-def sample_gmm_latent(batch_size):
-    z = gmm.sample(batch_size)[0]
-    return torch.tensor(z, dtype=torch.float32).cuda()
-
-def D_train(x, y_class, G, D, D_optimizer, gan_criterion, class_criterion, feature_matching=False):
+def D_train(x, G, D, D_optimizer, criterion):
     D.zero_grad()
 
-    # Train on real samples
-    x_real, y_real = x, torch.ones(x.shape[0], 1).cuda()
-    real_fake_output, class_output = D(x_real)
-    D_real_loss = gan_criterion(real_fake_output, y_real)
-    D_class_loss = class_criterion(class_output, y_class)
+    # Train on real images
+    x_real, y_real = x, torch.ones(x.size(0), 1)
+    x_real, y_real = x_real.cuda(), y_real.cuda()
+    D_output_real = D(x_real)
+    D_real_loss = criterion(D_output_real, y_real)
 
-    # Train on fake samples
-    z = sample_gmm_latent(x.shape[0])
-    x_fake, y_fake = G(z), torch.zeros(x.shape[0], 1).cuda()
-    fake_output, _ = D(x_fake)
-    D_fake_loss = gan_criterion(fake_output, y_fake)
-    
+    # Train on fake images
+    z = torch.randn(x.size(0), 100).cuda()
+    x_fake, y_fake = G(z), torch.zeros(x.size(0), 1).cuda()
+    D_output_fake = D(x_fake)
+    D_fake_loss = criterion(D_output_fake, y_fake)
+
     # Combine losses
-    D_loss = D_real_loss + D_fake_loss + D_class_loss
-
-    if feature_matching:
-        real_features = real_fake_output.mean(0)
-        fake_features = fake_output.mean(0)
-        feature_loss = torch.mean((real_features - fake_features) ** 2)
-        D_loss += feature_loss
-
-    # Update Discriminator
+    D_loss = D_real_loss + D_fake_loss
     D_loss.backward()
     D_optimizer.step()
-
+    
     return D_loss.item()
 
-def G_train(x, G, D, G_optimizer, gan_criterion, feature_matching=False):
+def G_train(x, G, D, G_optimizer, criterion, mode_seeking_lambda=0.05):
     G.zero_grad()
 
-    z = sample_gmm_latent(x.shape[0])
-    y_real = torch.ones(x.shape[0], 1).cuda()
+    # Standard Generator loss
+    z = torch.randn(x.size(0), 100).cuda()
+    y = torch.ones(x.size(0), 1).cuda()
     G_output = G(z)
-    fake_output, _ = D(G_output)
+    D_output = D(G_output)
+    G_loss = criterion(D_output, y)
 
-    G_loss = gan_criterion(fake_output, y_real)
+    # Mode-Seeking Loss
+    z1 = torch.randn(x.size(0), 100).cuda()
+    z2 = z1 + torch.normal(0, 0.1, size=z1.size()).cuda()  # Slightly perturbed
+    G_output1 = G(z1)
+    G_output2 = G(z2)
+    mode_seeking_loss = torch.mean((G_output1 - G_output2).pow(2).sum(dim=1))
 
-    if feature_matching:
-        real_features = fake_output.mean(0)
-        fake_features = D(G_output)[0].mean(0)
-        feature_loss = torch.mean((real_features - fake_features) ** 2)
-        G_loss += feature_loss
-
-    # Update Generator
-    G_loss.backward()
+    # Combine both losses
+    total_G_loss = G_loss + mode_seeking_lambda * mode_seeking_loss
+    total_G_loss.backward()
     G_optimizer.step()
-
-    return G_loss.item()
-
-def train_GAN(epochs, G, D, G_optimizer, D_optimizer, train_loader, gan_criterion, class_criterion, feature_matching=False):
-    for epoch in range(1, epochs + 1):
-        d_losses, g_losses = [], []
-        for batch_idx, (x, y_class) in enumerate(train_loader):
-            x = x.view(-1, 784).cuda()
-            y_class = y_class.cuda()
-
-            # Train Discriminator
-            d_loss = D_train(x, y_class, G, D, D_optimizer, gan_criterion, class_criterion, feature_matching)
-            d_losses.append(d_loss)
-
-            # Train Generator
-            g_loss = G_train(x, G, D, G_optimizer, gan_criterion, feature_matching)
-            g_losses.append(g_loss)
-
-        # Print results for each epoch
-        avg_d_loss = np.mean(d_losses)
-        avg_g_loss = np.mean(g_losses)
-        print(f"Epoch [{epoch}/{epochs}], Discriminator Loss: {avg_d_loss:.4f}, Generator Loss: {avg_g_loss:.4f}")
-
+    
+    return total_G_loss.item()
 
 def save_models(G, D, folder):
-    torch.save(G.state_dict(), os.path.join(folder,'G.pth'))
-    torch.save(D.state_dict(), os.path.join(folder,'D.pth'))
-
+    os.makedirs(folder, exist_ok=True)
+    torch.save(G.state_dict(), os.path.join(folder, 'G.pth'))
+    torch.save(D.state_dict(), os.path.join(folder, 'D.pth'))
 
 def load_model(G, folder):
-    ckpt = torch.load(os.path.join(folder,'G.pth'))
-    G.load_state_dict({k.replace('module.', ''): v for k, v in ckpt.items()})
+    checkpoint = torch.load(os.path.join(folder, 'G.pth'))
+    G.load_state_dict({k.replace('module.', ''): v for k, v in checkpoint.items()})
     return G
