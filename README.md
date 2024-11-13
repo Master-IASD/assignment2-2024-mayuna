@@ -1,7 +1,9 @@
 # DataLabAssignement2
 
 
-
+## method that we use
+We initially experimented with f-GAN and WGAN. 
+Finally, we applied Mode-Seeking Regularization, Rejection Sampling, and Latent Space Interpolation to address common issues like mode collapse and to enhance the quality and diversity of generated images
 ## Code to verify fid
 
 first, you need 
